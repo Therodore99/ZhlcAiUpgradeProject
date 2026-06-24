@@ -84,7 +84,7 @@ environments:
       username: ""
       password: ""
       remote_root: "/home/hundsun/10-账户系统远期包"
-      package_name_template: "账户升级包V{version_date}-小远期"
+      package_name_template: "账户升级包V{version_date} - 小远期"
       remote_temp_dir: "/tmp"
       local_root: "D:/账户系统UAT1升级包"
       connect_timeout: 20
@@ -140,8 +140,8 @@ environments:
       protocol: "ssh"
       username: ""
       password: ""
-      remote_root: "/home/hundsun/10-账户系统远期包"
-      package_name_template: "账户升级包V{version_date}-小远期"
+      remote_root: "/home/hundsun/01-账户系统升级"
+      package_name_template: "账户升级包V{version_date}"
       remote_temp_dir: "/tmp"
       local_root: "D:/账户系统UAT2升级包"
       connect_timeout: 20

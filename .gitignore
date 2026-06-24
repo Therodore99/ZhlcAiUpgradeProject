@@ -1,0 +1,5 @@
+__pycache__/
+*.py[cod]
+
+config/environments.yaml
+logs/*.log

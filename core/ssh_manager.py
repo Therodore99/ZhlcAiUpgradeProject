@@ -1,0 +1,81 @@
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional, Union
+
+import paramiko
+from scp import SCPClient
+
+
+@dataclass
+class CommandResult:
+    exit_status: int
+    stdout: str
+    stderr: str
+
+
+class SSHManager:
+    def __init__(
+        self,
+        *,
+        host: str,
+        port: int,
+        username: str,
+        password: str,
+        connect_timeout: int,
+    ):
+        self.host = host
+        self.port = port
+        self.username = username
+        self.password = password
+        self.connect_timeout = connect_timeout
+        self.client: Optional[paramiko.SSHClient] = None
+
+    def connect(self) -> None:
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(
+            hostname=self.host,
+            port=int(self.port),
+            username=self.username,
+            password=self.password,
+            timeout=int(self.connect_timeout),
+            banner_timeout=int(self.connect_timeout),
+            auth_timeout=int(self.connect_timeout),
+            look_for_keys=False,
+            allow_agent=False,
+        )
+        self.client = client
+
+    def execute_command(self, command: str, timeout: int) -> CommandResult:
+        if self.client is None:
+            raise RuntimeError("SSH 连接尚未建立。")
+
+        stdin, stdout, stderr = self.client.exec_command(command, timeout=int(timeout))
+        stdin.close()
+        exit_status = stdout.channel.recv_exit_status()
+        return CommandResult(
+            exit_status=exit_status,
+            stdout=stdout.read().decode("utf-8", errors="replace").strip(),
+            stderr=stderr.read().decode("utf-8", errors="replace").strip(),
+        )
+
+    def download_file(self, remote_path: str, local_path: Union[str, Path]) -> None:
+        if self.client is None:
+            raise RuntimeError("SSH 连接尚未建立。")
+
+        local_path = Path(local_path)
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        with SCPClient(self.client.get_transport()) as scp:
+            scp.get(remote_path, str(local_path))
+
+    def close(self) -> None:
+        if self.client is not None:
+            self.client.close()
+            self.client = None
+
+    def __enter__(self):
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()

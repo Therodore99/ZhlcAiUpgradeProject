@@ -1,0 +1,114 @@
+environments:
+  uat1:
+    description: "账户系统 UAT1 环境"
+
+    package:
+      host: ""
+      port: 10022
+      protocol: "ssh"
+      username: ""
+      password: ""
+      remote_root: "/home/example/package-root"
+      package_name_template: "账户升级包V{version_date} - 小远期"
+      remote_temp_dir: "/tmp"
+      local_root: "./packages/uat1"
+      connect_timeout: 20
+      command_timeout: 300
+
+    so:
+      host: ""
+      port: 10022
+      protocol: "ssh"
+      username: ""
+      password: ""
+      remote_appcom_dir: "/home/example/appcom"
+      remote_workspace_dir: "/home/example/workspace"
+      pre_command: "ks"
+      start_command: "./runall"
+      connect_timeout: 20
+      command_timeout: 300
+
+    database:
+      host: ""
+      port: 1521
+      username: ""
+      password: ""
+      service_name: ""
+
+    ufx:
+      host: ""
+      port: 445
+      protocol: "smb"
+      workspace_dir: "D:/fbase-ufx2/workspace"
+
+    microservice:
+      host: ""
+      port: 8081
+      protocol: "http"
+
+    schedule_task:
+      host: ""
+      port: 8088
+      protocol: "http"
+
+    workflow:
+      host: ""
+      port: 8088
+      protocol: "http"
+
+  uat2:
+    description: "账户系统 UAT2 环境"
+
+    package:
+      host: ""
+      port: 10022
+      protocol: "ssh"
+      username: ""
+      password: ""
+      remote_root: "/home/example/package-root"
+      package_name_template: "账户升级包V{version_date}"
+      remote_temp_dir: "/tmp"
+      local_root: "./packages/uat2"
+      connect_timeout: 20
+      command_timeout: 300
+
+    so:
+      host: ""
+      port: 10022
+      protocol: "ssh"
+      username: ""
+      password: ""
+      remote_appcom_dir: "/home/example/appcom"
+      remote_workspace_dir: "/home/example/workspace"
+      pre_command: "ks"
+      start_command: "./runall"
+      connect_timeout: 20
+      command_timeout: 300
+
+    database:
+      host: ""
+      port: 1521
+      username: ""
+      password: ""
+      service_name: ""
+
+    ufx:
+      host: ""
+      port: 445
+      protocol: "smb"
+      workspace_dir: "D:/fbase-ufx2/workspace"
+
+    microservice:
+      host: ""
+      port: 8081
+      protocol: "http"
+
+    schedule_task:
+      host: ""
+      port: 8088
+      protocol: "http"
+
+    workflow:
+      host: ""
+      port: 8088
+      protocol: "http"

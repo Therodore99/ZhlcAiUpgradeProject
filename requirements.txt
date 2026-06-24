@@ -1,0 +1,6 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.0.0
+paramiko>=3.4.0
+scp>=0.15.0
+PyYAML>=6.0.0
