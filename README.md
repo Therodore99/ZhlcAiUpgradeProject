@@ -1,2 +1,2 @@
 # ZhlcAiUpgradeProject
-zhlc automation upgrade project
+zhlc automation upgrade project-update
