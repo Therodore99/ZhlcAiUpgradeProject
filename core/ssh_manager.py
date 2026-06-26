@@ -1,9 +1,12 @@
 from dataclasses import dataclass
+from importlib import metadata
 from pathlib import Path
 from typing import Optional, Union
 
 import paramiko
 from scp import SCPClient
+
+LEGACY_HOST_KEY_ALGORITHMS = ("ssh-rsa", "ssh-dss")
 
 
 @dataclass
@@ -31,20 +34,39 @@ class SSHManager:
         self.client: Optional[paramiko.SSHClient] = None
 
     def connect(self) -> None:
+        self._enable_legacy_host_key_algorithms()
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(
-            hostname=self.host,
-            port=int(self.port),
-            username=self.username,
-            password=self.password,
-            timeout=int(self.connect_timeout),
-            banner_timeout=int(self.connect_timeout),
-            auth_timeout=int(self.connect_timeout),
-            look_for_keys=False,
-            allow_agent=False,
+        try:
+            client.connect(
+                hostname=self.host,
+                port=int(self.port),
+                username=self.username,
+                password=self.password,
+                timeout=int(self.connect_timeout),
+                banner_timeout=int(self.connect_timeout),
+                auth_timeout=int(self.connect_timeout),
+                look_for_keys=False,
+                allow_agent=False,
+            )
+            self.client = client
+        except Exception as exc:
+            client.close()
+            raise RuntimeError(
+                "SSH 连接失败: "
+                f"{exc}; paramiko={_get_package_version('paramiko')}, "
+                f"cryptography={_get_package_version('cryptography')}"
+            ) from exc
+
+    def _enable_legacy_host_key_algorithms(self) -> None:
+        preferred_keys = getattr(paramiko.Transport, "_preferred_keys", ())
+        if not preferred_keys:
+            return
+
+        updated_keys = tuple(
+            dict.fromkeys(LEGACY_HOST_KEY_ALGORITHMS + tuple(preferred_keys))
         )
-        self.client = client
+        paramiko.Transport._preferred_keys = updated_keys
 
     def execute_command(self, command: str, timeout: int) -> CommandResult:
         if self.client is None:
@@ -79,3 +101,10 @@ class SSHManager:
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
+
+
+def _get_package_version(package_name: str) -> str:
+    try:
+        return metadata.version(package_name)
+    except metadata.PackageNotFoundError:
+        return "not-installed"
