@@ -1,4 +1,5 @@
 import shlex
+import shutil
 import tarfile
 import time
 from os.path import commonpath
@@ -184,8 +185,20 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
                 warnings.append(cleanup_warning)
 
         try:
-            _extract_archive(archive_file, local_dir)
-            logger.info("extract_archive success local_dir=%s", local_dir)
+            extracted_file_count = _extract_archive(
+                archive_file,
+                local_dir,
+                encoding,
+                request.force,
+            )
+            logger.info(
+                "extract_archive success archive_file=%s extract_dir=%s "
+                "encoding=%s extracted_file_count=%s",
+                archive_file,
+                local_dir,
+                encoding,
+                extracted_file_count,
+            )
         except Exception as exc:
             logger.exception("extract_archive failed")
             return _failed_response(request, "extract_archive", "取包失败", exc, warnings, response_context)
@@ -316,19 +329,77 @@ def _cleanup_remote_archive(
     return None
 
 
-def _extract_archive(archive_file: Path, local_dir: Path) -> None:
-    with tarfile.open(archive_file, "r:gz") as tar:
-        _safe_extract(tar, local_dir)
+def _extract_archive(
+    archive_file: Path,
+    local_dir: Path,
+    encoding: str,
+    force: bool,
+) -> int:
+    if force:
+        _clean_extract_dir(local_dir, archive_file)
+
+    try:
+        with tarfile.open(
+            archive_file,
+            mode="r:gz",
+            encoding=encoding,
+            errors="replace",
+        ) as tar:
+            members = tar.getmembers()
+            _safe_extract(tar, local_dir, members)
+            return _count_member_files(members)
+    except TypeError:
+        # 兼容不支持 tarfile.open encoding/errors 参数的旧 Python。
+        with tarfile.open(archive_file, mode="r:gz") as tar:
+            members = tar.getmembers()
+            for member in members:
+                member.name = _repair_tar_name(member.name, encoding)
+                if member.linkname:
+                    member.linkname = _repair_tar_name(member.linkname, encoding)
+            _safe_extract(tar, local_dir, members)
+            return _count_member_files(members)
 
 
-def _safe_extract(tar: tarfile.TarFile, target_dir: Path) -> None:
+def _clean_extract_dir(local_dir: Path, archive_file: Path) -> None:
+    if not local_dir.exists():
+        return
+
+    archive_file = archive_file.resolve()
+    for path in local_dir.iterdir():
+        if path.resolve() == archive_file:
+            continue
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+
+
+def _repair_tar_name(name: str, encoding: str) -> str:
+    for source_encoding, errors in (("utf-8", "surrogateescape"), ("latin-1", "strict")):
+        try:
+            return name.encode(source_encoding, errors=errors).decode(encoding, errors="replace")
+        except UnicodeError:
+            continue
+    return name
+
+
+def _safe_extract(
+    tar: tarfile.TarFile,
+    target_dir: Path,
+    members: Optional[list[tarfile.TarInfo]] = None,
+) -> None:
     target_dir = target_dir.resolve()
-    for member in tar.getmembers():
+    members = members if members is not None else tar.getmembers()
+    for member in members:
         member_path = (target_dir / member.name).resolve()
         # 保守处理归档路径，避免异常包内容解压到目标目录之外。
         if commonpath([str(target_dir), str(member_path)]) != str(target_dir):
             raise RuntimeError(f"压缩包包含非法路径: {member.name}")
-    tar.extractall(target_dir)
+    tar.extractall(target_dir, members=members)
+
+
+def _count_member_files(members: list[tarfile.TarInfo]) -> int:
+    return sum(1 for member in members if member.isfile())
 
 
 def _count_files(local_dir: Path) -> int:
