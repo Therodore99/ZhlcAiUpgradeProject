@@ -12,6 +12,7 @@ from core.ssh_manager import SSHManager
 from schemas.package_schema import FetchPackageRequest
 
 logger = get_logger()
+PARENT_NOT_FOUND_MARKER = "__ACCOUNT_UPGRADE_PARENT_NOT_FOUND__"
 
 
 def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
@@ -19,6 +20,7 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
     warnings: list[str] = []
     remote_archive: Optional[str] = None
     ssh_manager: Optional[SSHManager] = None
+    response_context: dict[str, Any] = {}
 
     logger.info(
         "fetch_package start env=%s year=%s version_date=%s force=%s",
@@ -30,7 +32,9 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
 
     try:
         package_config = ConfigManager().get_package_config(request.env)
-        remote_dir = _build_remote_dir(package_config, request.year, request.version_date)
+        encoding = package_config["encoding"]
+        parent_dir = _build_parent_dir(package_config, request.year)
+        expected_remote_dir = _build_remote_dir(package_config, request.year, request.version_date)
         local_dir = _build_local_dir(package_config, request.version_date)
         archive_file = local_dir / f"account_upgrade_{request.version_date}.tar.gz"
         remote_archive = _build_remote_archive(
@@ -38,15 +42,35 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
             request.env,
             request.version_date,
         )
+        response_context = {
+            "encoding": encoding,
+            "parent_dir": parent_dir,
+            "candidates": [],
+            "expected_remote_dir": expected_remote_dir,
+            "actual_remote_dir": None,
+        }
 
-        logger.info("paths remote_dir=%s local_dir=%s", remote_dir, local_dir)
+        logger.info(
+            "paths encoding=%s parent_dir=%s expected_remote_dir=%s local_dir=%s",
+            encoding,
+            parent_dir,
+            expected_remote_dir,
+            local_dir,
+        )
 
         if not request.force and _has_local_files(local_dir):
             file_count = _count_files(local_dir)
             warnings.extend(_check_required_dirs(local_dir))
             elapsed = time.time() - start_time
             logger.info(
-                "fetch_package reused local result file_count=%s warnings=%s elapsed=%.2fs",
+                "fetch_package reused local result encoding=%s parent_dir=%s "
+                "expected_remote_dir=%s actual_remote_dir=%s candidates=%s "
+                "file_count=%s warnings=%s elapsed=%.2fs",
+                encoding,
+                parent_dir,
+                expected_remote_dir,
+                response_context["actual_remote_dir"],
+                response_context["candidates"],
                 file_count,
                 warnings,
                 elapsed,
@@ -58,7 +82,8 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
                 version_date=request.version_date,
                 message="本地目录已存在且包含文件，本次未重新下载",
                 data={
-                    "remote_dir": remote_dir,
+                    **response_context,
+                    "remote_dir": expected_remote_dir,
                     "local_dir": str(local_dir),
                     "archive_file": str(archive_file),
                     "file_count": file_count,
@@ -75,29 +100,59 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
                 username=package_config["username"],
                 password=package_config["password"],
                 connect_timeout=int(package_config["connect_timeout"]),
+                encoding=encoding,
             )
             ssh_manager.connect()
             logger.info("ssh_connect success host=%s port=%s", package_config["host"], package_config["port"])
         except Exception as exc:
             logger.exception("ssh_connect failed")
-            return _failed_response(request, "ssh_connect", "取包失败", exc)
+            return _failed_response(request, "ssh_connect", "取包失败", exc, warnings, response_context)
 
         command_timeout = int(package_config["command_timeout"])
-        remote_exists = _check_remote_dir(ssh_manager, remote_dir, command_timeout)
-        logger.info("remote_dir check result=%s remote_dir=%s", remote_exists, remote_dir)
-        if not remote_exists:
+        try:
+            parent_exists, candidates = _list_remote_package_candidates(
+                ssh_manager,
+                parent_dir,
+                command_timeout,
+            )
+        except Exception as exc:
+            logger.exception("remote_list failed")
+            return _failed_response(request, "remote_list", "取包失败", exc, warnings, response_context)
+
+        response_context["candidates"] = candidates
+        actual_dir_name = _select_package_dir(candidates, request.version_date)
+        if parent_exists and actual_dir_name is not None:
+            actual_remote_dir = f"{parent_dir.rstrip('/')}/{actual_dir_name}"
+            response_context["actual_remote_dir"] = actual_remote_dir
+        else:
+            actual_remote_dir = None
+
+        logger.info(
+            "remote candidates encoding=%s parent_dir=%s expected_remote_dir=%s "
+            "actual_remote_dir=%s candidates=%s",
+            encoding,
+            parent_dir,
+            expected_remote_dir,
+            actual_remote_dir,
+            candidates,
+        )
+
+        if actual_remote_dir is None:
             return build_response(
                 status="not_found",
                 step="fetch_package",
                 env=request.env,
                 version_date=request.version_date,
                 message="未发现当前版本升级包目录，等待下次触发",
-                data={"remote_dir": remote_dir},
+                data={
+                    **response_context,
+                    "remote_dir": expected_remote_dir,
+                },
                 warnings=warnings,
             )
 
         tar_result = ssh_manager.execute_command(
-            f"cd {shlex.quote(remote_dir)} && tar -czf {shlex.quote(remote_archive)} .",
+            f"cd {shlex.quote(actual_remote_dir)} && tar -czf {shlex.quote(remote_archive)} .",
             timeout=command_timeout,
         )
         if tar_result.exit_status != 0:
@@ -107,15 +162,22 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
                 "remote_tar",
                 "取包失败",
                 RuntimeError(tar_result.stderr or tar_result.stdout or "远程压缩失败"),
+                warnings,
+                response_context,
             )
-        logger.info("remote_tar success remote_archive=%s", remote_archive)
+        logger.info(
+            "remote_tar success encoding=%s actual_remote_dir=%s remote_archive=%s",
+            encoding,
+            actual_remote_dir,
+            remote_archive,
+        )
 
         try:
             ssh_manager.download_file(remote_archive, archive_file)
             logger.info("scp_download success archive_file=%s", archive_file)
         except Exception as exc:
             logger.exception("scp_download failed")
-            return _failed_response(request, "scp_download", "取包失败", exc)
+            return _failed_response(request, "scp_download", "取包失败", exc, warnings, response_context)
         finally:
             cleanup_warning = _cleanup_remote_archive(ssh_manager, remote_archive, command_timeout)
             if cleanup_warning:
@@ -126,13 +188,19 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
             logger.info("extract_archive success local_dir=%s", local_dir)
         except Exception as exc:
             logger.exception("extract_archive failed")
-            return _failed_response(request, "extract_archive", "取包失败", exc, warnings)
+            return _failed_response(request, "extract_archive", "取包失败", exc, warnings, response_context)
 
         file_count = _count_files(local_dir)
         warnings.extend(_check_required_dirs(local_dir))
         elapsed = time.time() - start_time
         logger.info(
-            "fetch_package success file_count=%s warnings=%s elapsed=%.2fs",
+            "fetch_package success encoding=%s parent_dir=%s expected_remote_dir=%s "
+            "actual_remote_dir=%s candidates=%s file_count=%s warnings=%s elapsed=%.2fs",
+            encoding,
+            parent_dir,
+            expected_remote_dir,
+            actual_remote_dir,
+            candidates,
             file_count,
             warnings,
             elapsed,
@@ -145,7 +213,8 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
             version_date=request.version_date,
             message="取包完成",
             data={
-                "remote_dir": remote_dir,
+                **response_context,
+                "remote_dir": actual_remote_dir,
                 "local_dir": str(local_dir),
                 "archive_file": str(archive_file),
                 "file_count": file_count,
@@ -158,7 +227,7 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
         return _failed_response(request, "config", "取包失败", exc, warnings)
     except Exception as exc:
         logger.exception("fetch_package unexpected failed")
-        return _failed_response(request, "fetch_package", "取包失败", exc, warnings)
+        return _failed_response(request, "fetch_package", "取包失败", exc, warnings, response_context)
     finally:
         if ssh_manager is not None:
             ssh_manager.close()
@@ -168,7 +237,11 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
 
 def _build_remote_dir(package_config: dict[str, Any], year: str, version_date: str) -> str:
     package_name = package_config["package_name_template"].format(version_date=version_date)
-    return f"{package_config['remote_root'].rstrip('/')}/{year}/{package_name}"
+    return f"{_build_parent_dir(package_config, year)}/{package_name}"
+
+
+def _build_parent_dir(package_config: dict[str, Any], year: str) -> str:
+    return f"{package_config['remote_root'].rstrip('/')}/{year}"
 
 
 def _build_local_dir(package_config: dict[str, Any], version_date: str) -> Path:
@@ -186,10 +259,43 @@ def _has_local_files(local_dir: Path) -> bool:
     return local_dir.exists() and any(path.is_file() for path in local_dir.rglob("*"))
 
 
-def _check_remote_dir(ssh_manager: SSHManager, remote_dir: str, timeout: int) -> bool:
-    command = f"test -d {shlex.quote(remote_dir)} && echo OK || echo NOT_FOUND"
+def _list_remote_package_candidates(
+    ssh_manager: SSHManager,
+    parent_dir: str,
+    timeout: int,
+) -> tuple[bool, list[str]]:
+    command = (
+        f"if test -d {shlex.quote(parent_dir)}; then "
+        f"cd {shlex.quote(parent_dir)} && find . -maxdepth 1 -mindepth 1 -type d -print; "
+        f"else echo {PARENT_NOT_FOUND_MARKER}; fi"
+    )
     result = ssh_manager.execute_command(command, timeout=timeout)
-    return result.exit_status == 0 and "OK" in result.stdout.splitlines()
+    if result.exit_status != 0:
+        raise RuntimeError(result.stderr or result.stdout or "远程目录候选列表获取失败")
+
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if PARENT_NOT_FOUND_MARKER in lines:
+        return False, []
+
+    return True, [_normalize_find_dir(line) for line in lines]
+
+
+def _normalize_find_dir(path: str) -> str:
+    if path == ".":
+        return ""
+    if path.startswith("./"):
+        return path[2:]
+    return path.rstrip("/")
+
+
+def _select_package_dir(candidates: list[str], version_date: str) -> Optional[str]:
+    version_candidates = [name for name in candidates if version_date in name]
+    preferred_candidates = [name for name in version_candidates if "小远期" in name]
+    if preferred_candidates:
+        return preferred_candidates[0]
+    if version_candidates:
+        return version_candidates[0]
+    return None
 
 
 def _cleanup_remote_archive(
@@ -245,6 +351,7 @@ def _failed_response(
     message: str,
     exc: Exception,
     warnings: Optional[list[str]] = None,
+    data: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     return build_response(
         status="failed",
@@ -252,6 +359,7 @@ def _failed_response(
         env=request.env,
         version_date=request.version_date,
         message=message,
+        data=data,
         warnings=warnings or [],
         error=str(exc),
     )

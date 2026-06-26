@@ -1,3 +1,4 @@
+import codecs
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -50,6 +51,7 @@ class ConfigManager:
         package_config = env_config.get("package")
         if not isinstance(package_config, dict):
             raise ConfigError(f"环境 {env} 缺少 package 配置。")
+        package_config = dict(package_config)
 
         required_fields = [
             "host",
@@ -75,5 +77,14 @@ class ConfigManager:
 
         if package_config.get("protocol") != "ssh":
             raise ConfigError(f"环境 {env} 的 package.protocol 当前仅支持 ssh。")
+
+        if not package_config.get("encoding"):
+            package_config["encoding"] = "gbk"
+        try:
+            codecs.lookup(package_config["encoding"])
+        except LookupError as exc:
+            raise ConfigError(
+                f"环境 {env} 的 package.encoding 无效: {package_config['encoding']}"
+            ) from exc
 
         return package_config

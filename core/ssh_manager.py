@@ -25,12 +25,14 @@ class SSHManager:
         username: str,
         password: str,
         connect_timeout: int,
+        encoding: str = "utf-8",
     ):
         self.host = host
         self.port = port
         self.username = username
         self.password = password
         self.connect_timeout = connect_timeout
+        self.encoding = encoding
         self.client: Optional[paramiko.SSHClient] = None
 
     def connect(self) -> None:
@@ -72,13 +74,14 @@ class SSHManager:
         if self.client is None:
             raise RuntimeError("SSH 连接尚未建立。")
 
-        stdin, stdout, stderr = self.client.exec_command(command, timeout=int(timeout))
+        command_bytes = command.encode(self.encoding, errors="replace")
+        stdin, stdout, stderr = self.client.exec_command(command_bytes, timeout=int(timeout))
         stdin.close()
         exit_status = stdout.channel.recv_exit_status()
         return CommandResult(
             exit_status=exit_status,
-            stdout=stdout.read().decode("utf-8", errors="replace").strip(),
-            stderr=stderr.read().decode("utf-8", errors="replace").strip(),
+            stdout=stdout.read().decode(self.encoding, errors="replace").strip(),
+            stderr=stderr.read().decode(self.encoding, errors="replace").strip(),
         )
 
     def download_file(self, remote_path: str, local_path: Union[str, Path]) -> None:

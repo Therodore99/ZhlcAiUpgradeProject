@@ -6,6 +6,7 @@ environments:
       host: ""
       port: 10022
       protocol: "ssh"
+      encoding: "gbk"
       username: ""
       password: ""
       remote_root: "/home/example/package-root"
@@ -63,6 +64,7 @@ environments:
       host: ""
       port: 10022
       protocol: "ssh"
+      encoding: "gbk"
       username: ""
       password: ""
       remote_root: "/home/example/package-root"
