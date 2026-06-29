@@ -6,6 +6,7 @@ class FetchPackageRequest(BaseModel):
     year: str = Field(..., min_length=4, max_length=4)
     version_date: str = Field(..., min_length=8, max_length=8)
     force: bool = False
+    debug: bool = False
 
     @field_validator("env")
     @classmethod

@@ -169,13 +169,38 @@ package.local_root
 
 version_date
 
-最终本地目录：
+第二阶段起，本地目录采用版本目录 + 快照目录结构。
+
+版本目录：
 
 {package.local_root}/{version_date}
 
+快照目录：
+
+{package.local_root}/{version_date}/{snapshot_time}
+
+其中 snapshot_time 格式为：
+
+YYYYMMDD_HHMMSS
+
 示例：
 
-D:/账户系统UAT1升级包/20260529
+D:/账户系统UAT1升级包/20260529/20260629_190000
+
+快照目录内部结构：
+
+```text
+{snapshot_dir}/
+├── package/
+├── account_upgrade_{version_date}.tar.gz
+├── manifest.json
+├── diff_from_previous.json
+└── upgrade_plan.json
+```
+
+压缩包下载到 snapshot_dir 下，解压内容放入 snapshot_dir/package 下。
+
+version_dir 下维护 latest.txt，内容为最新 snapshot_dir 的绝对路径。
 
 ---
 
@@ -287,7 +312,7 @@ remote_tar
 
 本地压缩包示例：
 
-D:/账户系统UAT1升级包/20260529/account_upgrade_20260529.tar.gz
+D:/账户系统UAT1升级包/20260529/20260629_190000/account_upgrade_20260529.tar.gz
 
 失败 step：
 
@@ -307,7 +332,11 @@ rm -f "{remote_archive}"
 
 ### 12.9 本地解压
 
-将本地压缩包解压到本地目录。
+将本地压缩包解压到：
+
+{snapshot_dir}/package
+
+tar.gz 内中文文件名按 package.encoding 解码。
 
 失败 step：
 
@@ -317,7 +346,7 @@ extract_archive
 
 ### 12.10 统计文件
 
-统计本地目录下文件数量。
+统计 package 目录下文件数量。
 
 检查关键目录是否存在：
 
@@ -432,10 +461,180 @@ logs/fetch_package.log
 
 ## 18. 后续功能依赖
 
-取包成功后必须返回 local_dir。
+取包成功后必须返回 package_dir。
 
 SO 升级功能将根据 local_dir 查找：
 
-{local_dir}/appcom
+{package_dir}/appcom
 
 并获取其中所有 .so 文件。
+
+---
+
+## 19. Snapshot 目录设计
+
+每次 force=true 执行取包时，创建新的 snapshot_time 目录，避免覆盖历史取包结果。
+
+目录规则：
+
+```text
+version_dir = {package.local_root}/{version_date}
+snapshot_dir = {version_dir}/{snapshot_time}
+package_dir = {snapshot_dir}/package
+```
+
+snapshot_time 使用本地服务时间，格式为 YYYYMMDD_HHMMSS。
+
+latest.txt 写入 version_dir/latest.txt，内容为最新 snapshot_dir 的绝对路径。
+
+当 force=false 且 latest.txt 指向的快照可用时，可以直接返回 success，并说明本次未重新下载。
+
+---
+
+## 20. manifest.json 设计
+
+解压完成后扫描 package_dir 下全部文件，生成：
+
+```text
+{snapshot_dir}/manifest.json
+```
+
+结构：
+
+```json
+{
+  "env": "uat1",
+  "version_date": "20260626",
+  "snapshot_time": "20260629_190000",
+  "package_dir": "D:/账户系统UAT1升级包/20260626/20260629_190000/package",
+  "file_count": 128,
+  "files": [
+    {
+      "relative_path": "appcom/client.so",
+      "category": "so",
+      "file_name": "client.so",
+      "size": 2389120,
+      "mtime": "2026-06-29 18:22:11",
+      "mtime_epoch": 1782738131,
+      "sha256": "xxx"
+    }
+  ]
+}
+```
+
+relative_path 统一使用 / 分隔。
+
+分类规则：
+
+1. 路径包含 appcom 且后缀为 .so，category=so。
+2. 路径包含 sql 且后缀为 .sql，category=sql。
+3. 路径包含 其他程序/ufx 且后缀为 .xml，category=ufx。
+4. 路径包含 账户定时任务 和 定时任务 且后缀为 .zip，category=schedule_task。
+5. 路径包含 账户定时任务 和 工作流 且后缀为 .zip，category=workflow。
+6. 路径包含 账户定时任务 和 项目配置 且后缀为 .zip，category=project_config。
+7. 其他文件 category=other。
+
+如果路径包含 账户定时任务，但不属于定时任务、工作流、项目配置三类目录，也归类为 other。
+
+---
+
+## 21. diff_from_previous.json 设计
+
+生成当前 manifest 后，在同一个 version_dir 下查找上一个包含 manifest.json 的 snapshot。
+
+查找规则：
+
+1. 列出 version_dir 下所有目录。
+2. 排除当前 snapshot_time。
+3. 按目录名倒序排序。
+4. 找到最近一个包含 manifest.json 的 snapshot。
+
+如果找到上一个 snapshot，则 mode=incremental。
+
+如果找不到，则 mode=full。
+
+diff 文件路径：
+
+```text
+{snapshot_dir}/diff_from_previous.json
+```
+
+比较规则：
+
+1. added：新 manifest 有，旧 manifest 没有。
+2. deleted：旧 manifest 有，新 manifest 没有。
+3. modified：relative_path 相同，但 size、mtime_epoch、sha256 任一字段变化。
+4. unchanged：relative_path 相同，且 size、mtime_epoch、sha256 均未变化。
+
+---
+
+## 22. upgrade_plan.json 设计
+
+根据 diff_from_previous.json 生成：
+
+```text
+{snapshot_dir}/upgrade_plan.json
+```
+
+需要处理的文件为 added + modified。
+
+按 category 分组生成 tasks：
+
+1. so/sql/ufx：files 非空则 need_run=true。
+2. sql：need_manual_confirm 固定为 true。
+3. schedule_task/workflow/project_config：files 非空则 need_notify=true。
+4. other：暂不通知，need_notify=false。
+
+upgrade_plan 只生成计划，不执行 SO、SQL、UFX 或平台发布。
+
+---
+
+## 23. 返回结果增强
+
+保持统一返回格式不变，在 data 中增加：
+
+```json
+{
+  "version_dir": "...",
+  "snapshot_dir": "...",
+  "snapshot_time": "20260629_190000",
+  "package_dir": "...",
+  "archive_file": "...",
+  "manifest_file": "...",
+  "diff_file": "...",
+  "upgrade_plan_file": "...",
+  "mode": "full",
+  "summary": {
+    "file_count": 128,
+    "added_count": 1,
+    "modified_count": 1,
+    "deleted_count": 0,
+    "unchanged_count": 126,
+    "so_changed": 1,
+    "sql_changed": 1,
+    "ufx_changed": 0,
+    "schedule_task_changed": 1,
+    "workflow_changed": 1,
+    "project_config_changed": 1,
+    "other_changed": 0
+  }
+}
+```
+
+---
+
+## 24. 日志增强
+
+fetch_package.log 增加记录：
+
+1. version_dir
+2. snapshot_dir
+3. package_dir
+4. manifest_file
+5. diff_file
+6. upgrade_plan_file
+7. mode
+8. added_count
+9. modified_count
+10. deleted_count
+11. so_changed/sql_changed/ufx_changed/schedule_task_changed/workflow_changed/project_config_changed
