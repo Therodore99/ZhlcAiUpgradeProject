@@ -57,6 +57,9 @@ def categorize_file(relative_path: str) -> str:
     if "其他程序" in parts and "ufx" in lower_parts and suffix == ".xml":
         return "ufx"
 
+    if "微服务" in parts and suffix == ".zip":
+        return "microservice"
+
     if "账户定时任务" in parts and suffix == ".zip":
         if "定时任务" in parts:
             return "schedule_task"

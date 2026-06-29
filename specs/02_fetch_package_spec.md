@@ -529,10 +529,11 @@ relative_path 统一使用 / 分隔。
 1. 路径包含 appcom 且后缀为 .so，category=so。
 2. 路径包含 sql 且后缀为 .sql，category=sql。
 3. 路径包含 其他程序/ufx 且后缀为 .xml，category=ufx。
-4. 路径包含 账户定时任务 和 定时任务 且后缀为 .zip，category=schedule_task。
-5. 路径包含 账户定时任务 和 工作流 且后缀为 .zip，category=workflow。
-6. 路径包含 账户定时任务 和 项目配置 且后缀为 .zip，category=project_config。
-7. 其他文件 category=other。
+4. 路径包含 微服务 且后缀为 .zip，category=microservice。
+5. 路径包含 账户定时任务 和 定时任务 且后缀为 .zip，category=schedule_task。
+6. 路径包含 账户定时任务 和 工作流 且后缀为 .zip，category=workflow。
+7. 路径包含 账户定时任务 和 项目配置 且后缀为 .zip，category=project_config。
+8. 其他文件 category=other。
 
 如果路径包含 账户定时任务，但不属于定时任务、工作流、项目配置三类目录，也归类为 other。
 
@@ -582,10 +583,11 @@ diff 文件路径：
 
 1. so/sql/ufx：files 非空则 need_run=true。
 2. sql：need_manual_confirm 固定为 true。
-3. schedule_task/workflow/project_config：files 非空则 need_notify=true。
-4. other：暂不通知，need_notify=false。
+3. microservice/schedule_task/workflow/project_config：files 非空则 need_notify=true。
+4. microservice 使用 need_notify，不使用 need_run。
+5. other：暂不通知，need_notify=false。
 
-upgrade_plan 只生成计划，不执行 SO、SQL、UFX 或平台发布。
+upgrade_plan 只生成计划，不执行 SO、SQL、UFX、微服务发布或平台发布。
 
 ---
 
@@ -613,6 +615,7 @@ upgrade_plan 只生成计划，不执行 SO、SQL、UFX 或平台发布。
     "so_changed": 1,
     "sql_changed": 1,
     "ufx_changed": 0,
+    "microservice_changed": 1,
     "schedule_task_changed": 1,
     "workflow_changed": 1,
     "project_config_changed": 1,
@@ -637,4 +640,4 @@ fetch_package.log 增加记录：
 8. added_count
 9. modified_count
 10. deleted_count
-11. so_changed/sql_changed/ufx_changed/schedule_task_changed/workflow_changed/project_config_changed
+11. so_changed/sql_changed/ufx_changed/microservice_changed/schedule_task_changed/workflow_changed/project_config_changed

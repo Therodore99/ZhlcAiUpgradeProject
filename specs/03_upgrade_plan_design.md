@@ -41,10 +41,11 @@ category 根据路径和后缀判断：
 1. appcom 下 .so 为 so。
 2. sql 下 .sql 为 sql。
 3. 其他程序/ufx 下 .xml 为 ufx。
-4. 账户定时任务/.../定时任务 下 .zip 为 schedule_task。
-5. 账户定时任务/.../工作流 下 .zip 为 workflow。
-6. 账户定时任务/.../项目配置 下 .zip 为 project_config。
-7. 其他文件为 other。
+4. 微服务 下 .zip 为 microservice。
+5. 账户定时任务/.../定时任务 下 .zip 为 schedule_task。
+6. 账户定时任务/.../工作流 下 .zip 为 workflow。
+7. 账户定时任务/.../项目配置 下 .zip 为 project_config。
+8. 其他文件为 other。
 
 ---
 
@@ -98,10 +99,11 @@ added + modified
 1. so -> tasks.so.files
 2. sql -> tasks.sql.files
 3. ufx -> tasks.ufx.files
-4. schedule_task -> tasks.schedule_task.files
-5. workflow -> tasks.workflow.files
-6. project_config -> tasks.project_config.files
-7. other -> tasks.other.files
+4. microservice -> tasks.microservice.files
+5. schedule_task -> tasks.schedule_task.files
+6. workflow -> tasks.workflow.files
+7. project_config -> tasks.project_config.files
+8. other -> tasks.other.files
 
 need_run 规则：
 
@@ -115,8 +117,9 @@ need_manual_confirm 规则：
 
 need_notify 规则：
 
-1. schedule_task/workflow/project_config 只要 files 非空，need_notify=true。
-2. other 暂时 need_notify=false。
+1. microservice/schedule_task/workflow/project_config 只要 files 非空，need_notify=true。
+2. microservice 使用 need_notify，不使用 need_run。
+3. other 暂时 need_notify=false。
 
 upgrade_plan 文件：
 
@@ -170,7 +173,17 @@ tasks.workflow.files
 tasks.project_config.files
 ```
 
-当前阶段只生成 need_notify 标记，后续再接入对应平台发布能力。
+当前阶段只生成 need_notify 标记，后续再接入微服务和对应平台发布能力。
+
+### 微服务发布
+
+读取：
+
+```text
+tasks.microservice.files
+```
+
+当前阶段不执行实际微服务发布，只在 upgrade_plan 中生成变更计划和 need_notify 标记。后续微服务发布模块将基于 tasks.microservice.files 执行。
 
 ---
 

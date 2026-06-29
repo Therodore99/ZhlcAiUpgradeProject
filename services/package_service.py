@@ -265,8 +265,9 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
             "actual_remote_dir=%s candidates=%s version_dir=%s snapshot_dir=%s "
             "package_dir=%s manifest_file=%s diff_file=%s upgrade_plan_file=%s "
             "mode=%s added_count=%s modified_count=%s deleted_count=%s "
-            "so_changed=%s sql_changed=%s ufx_changed=%s schedule_task_changed=%s "
-            "workflow_changed=%s project_config_changed=%s file_count=%s warnings=%s elapsed=%.2fs",
+            "so_changed=%s sql_changed=%s ufx_changed=%s microservice_changed=%s "
+            "schedule_task_changed=%s workflow_changed=%s project_config_changed=%s "
+            "file_count=%s warnings=%s elapsed=%.2fs",
             encoding,
             parent_dir,
             expected_remote_dir,
@@ -285,6 +286,7 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
             summary["so_changed"],
             summary["sql_changed"],
             summary["ufx_changed"],
+            summary["microservice_changed"],
             summary["schedule_task_changed"],
             summary["workflow_changed"],
             summary["project_config_changed"],
@@ -436,6 +438,7 @@ def _build_response_summary(
         "so_changed": int(plan_summary.get("so_changed", 0)),
         "sql_changed": int(plan_summary.get("sql_changed", 0)),
         "ufx_changed": int(plan_summary.get("ufx_changed", 0)),
+        "microservice_changed": int(plan_summary.get("microservice_changed", 0)),
         "schedule_task_changed": int(plan_summary.get("schedule_task_changed", 0)),
         "workflow_changed": int(plan_summary.get("workflow_changed", 0)),
         "project_config_changed": int(plan_summary.get("project_config_changed", 0)),

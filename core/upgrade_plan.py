@@ -4,6 +4,7 @@ CATEGORIES = [
     "so",
     "sql",
     "ufx",
+    "microservice",
     "schedule_task",
     "workflow",
     "project_config",
@@ -33,6 +34,10 @@ def generate_upgrade_plan(diff: dict[str, Any]) -> dict[str, Any]:
         "ufx": {
             "need_run": bool(grouped_files["ufx"]),
             "files": grouped_files["ufx"],
+        },
+        "microservice": {
+            "need_notify": bool(grouped_files["microservice"]),
+            "files": grouped_files["microservice"],
         },
         "schedule_task": {
             "need_notify": bool(grouped_files["schedule_task"]),
