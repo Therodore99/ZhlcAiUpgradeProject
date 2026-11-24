@@ -51,7 +51,7 @@ config/environments.yaml
 1. environments.example.yaml 可提交代码仓库。
 2. environments.yaml 用于本地真实运行。
 3. environments.yaml 不建议提交代码仓库。
-4. 密码可为空，后续支持从环境变量读取。
+4. 示例不含凭据。启用环境可使用 password_env、username_env 指定环境变量名。
 
 ---
 
@@ -70,126 +70,15 @@ config/environments.yaml
 
 ---
 
-## 5. 配置文件示例结构
+## 5. 三系统配置结构
 
-```yaml
-environments:
-  uat1:
-    description: "账户系统 UAT1 环境"
+配置路径为 `systems.<system>.<env>`，包含布尔 `enabled` 和 `package`，老账户原 SO/database/UFX 等块仍与 package 并列。完整六套配置见 [示例 YAML](../config/environments.example.yaml)。
 
-    package:
-      host: "10.189.145.11"
-      port: 10022
-      protocol: "ssh"
-      username: ""
-      password: ""
-      remote_root: "/home/hundsun/10-账户系统远期包"
-      package_name_template: "账户升级包V{version_date} - 小远期"
-      remote_temp_dir: "/tmp"
-      local_root: "D:/账户系统UAT1升级包"
-      connect_timeout: 20
-      command_timeout: 300
-
-    so:
-      host: "10.187.96.127"
-      port: 10022
-      protocol: "ssh"
-      username: ""
-      password: ""
-      remote_appcom_dir: "/home/hundsun/appcom"
-      remote_workspace_dir: "/home/hundsun/workspace"
-      pre_command: "ks"
-      start_command: "./runall"
-      connect_timeout: 20
-      command_timeout: 300
-
-    database:
-      host: "10.187.98.180"
-      port: 1521
-      username: ""
-      password: ""
-      service_name: ""
-
-    ufx:
-      host: "10.187.96.133"
-      port: 445
-      protocol: "smb"
-      workspace_dir: "D:/fbase-ufx2/workspace"
-
-    microservice:
-      host: "10.187.128.52"
-      port: 8081
-      protocol: "http"
-
-    schedule_task:
-      host: "10.184.129.78"
-      port: 8088
-      protocol: "http"
-
-    workflow:
-      host: "10.187.128.143"
-      port: 8088
-      protocol: "http"
-
-  uat2:
-    description: "账户系统 UAT2 环境"
-
-    package:
-      host: "10.189.145.11"
-      port: 10022
-      protocol: "ssh"
-      username: ""
-      password: ""
-      remote_root: "/home/hundsun/01-账户系统升级"
-      package_name_template: "账户升级包V{version_date}"
-      remote_temp_dir: "/tmp"
-      local_root: "D:/账户系统UAT2升级包"
-      connect_timeout: 20
-      command_timeout: 300
-
-    so:
-      host: "10.144.1.22"
-      port: 10022
-      protocol: "ssh"
-      username: ""
-      password: ""
-      remote_appcom_dir: "/home/hundsun/appcom"
-      remote_workspace_dir: "/home/hundsun/workspace"
-      pre_command: "ks"
-      start_command: "./runall"
-      connect_timeout: 20
-      command_timeout: 300
-
-    database:
-      host: "10.144.10.11"
-      port: 1521
-      username: ""
-      password: ""
-      service_name: ""
-
-    ufx:
-      host: "10.144.1.23"
-      port: 445
-      protocol: "smb"
-      workspace_dir: "D:/fbase-ufx2/workspace"
-
-    microservice:
-      host: "10.144.1.25"
-      port: 8081
-      protocol: "http"
-
-    schedule_task:
-      host: "10.144.2.93"
-      port: 8088
-      protocol: "http"
-
-    workflow:
-      host: "10.144.1.28"
-      port: 8088
-      protocol: "http"
-```
-
----
+- legacy_account：UAT1 小远期、UAT2 生产包，分别配置完整父目录，使用 GBK。
+- bus：两环境允许共用远端来源，但必须分别配置 local_root；编码现场核实。
+- xinchuang_account：UTF-8，UAT1 开放；UAT2 enabled=false，直接 skipped，不读取凭据、不连接其他环境。
+- 每个组合使用独立 local_root，隔离 snapshot、latest.txt 和 diff；category_profile 与 system 一致。缺少配置返回 failed/config，不回退。
+- Dify 无需传 year。路径中的年份是实际目录名的一部分，由运维按需维护。
 
 ## 6. Package 配置说明
 
@@ -225,7 +114,7 @@ SSH 密码。
 
 例如：
 
-/home/hundsun/10-账户系统远期包
+/home/hundsun/10-账户系统远期包/2026
 
 ### package_name_template
 
@@ -309,47 +198,19 @@ core/config_manager.py
 
 提供以下能力：
 
-### load_config()
+### load()
 
 读取 config/environments.yaml。
 
 如果文件不存在，提示用户复制 environments.example.yaml。
 
-### get_env_config(env)
+### get_environment(system, env) / get_package_config(system, env)
 
-根据 env 获取完整环境配置。
+前者检查配置与启用状态，后者校验选中环境的取包字段。本期不读取执行模块配置。
 
-### get_package_config(env)
+## 9. 凭据
 
-获取取包配置。
-
-### get_so_config(env)
-
-获取 SO 升级配置。
-
----
-
-## 9. 环境变量覆盖要求
-
-后续可支持使用环境变量覆盖敏感信息。
-
-示例：
-
-PACKAGE_USERNAME
-
-PACKAGE_PASSWORD
-
-SO_USERNAME
-
-SO_PASSWORD
-
-优先级：
-
-1. 环境变量
-2. environments.yaml
-3. 默认空值
-
----
+支持 YAML 中原有 username/password 或显式的 username_env/password_env。设置变量名后，必须从对应环境变量取得非空值，缺失即报错，不回退。不要将真实配置提交到仓库。
 
 ## 10. 错误处理
 

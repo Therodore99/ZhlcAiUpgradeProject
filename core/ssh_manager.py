@@ -80,7 +80,7 @@ class SSHManager:
         exit_status = stdout.channel.recv_exit_status()
         return CommandResult(
             exit_status=exit_status,
-            stdout=stdout.read().decode(self.encoding, errors="replace").strip(),
+            stdout=stdout.read().decode(self.encoding, errors="replace").rstrip("\r\n"),
             stderr=stderr.read().decode(self.encoding, errors="replace").strip(),
         )
 

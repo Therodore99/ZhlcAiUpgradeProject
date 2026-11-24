@@ -7,8 +7,11 @@ from datetime import datetime
 from os.path import commonpath
 from pathlib import Path
 from typing import Any, Optional
+from uuid import uuid4
 
-from core.config_manager import ConfigError, ConfigManager
+from filelock import FileLock, Timeout
+
+from core.config_manager import ConfigError, ConfigManager, EnvironmentDisabled
 from core.file_diff import find_previous_snapshot, generate_diff
 from core.file_manifest import generate_manifest
 from core.logger import get_logger
@@ -26,10 +29,12 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
     warnings: list[str] = []
     remote_archive: Optional[str] = None
     ssh_manager: Optional[SSHManager] = None
+    lock = None
     response_context: dict[str, Any] = {}
 
     logger.info(
-        "fetch_package start env=%s year=%s version_date=%s force=%s debug=%s",
+        "fetch_package start system=%s env=%s year=%s version_date=%s force=%s debug=%s",
+        request.system,
         request.env,
         request.year,
         request.version_date,
@@ -38,11 +43,20 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
     )
 
     try:
-        package_config = ConfigManager().get_package_config(request.env)
+        package_config = ConfigManager().get_package_config(request.system, request.env)
         encoding = package_config["encoding"]
-        parent_dir = _build_parent_dir(package_config, request.year)
-        expected_remote_dir = _build_remote_dir(package_config, request.year, request.version_date)
+        parent_dir = package_config["remote_root"]
+        expected_name = package_config["package_name_template"].format(version_date=request.version_date)
+        expected_remote_dir = f"{parent_dir.rstrip('/')}/{expected_name}"
         version_dir = _build_version_dir(package_config, request.version_date)
+        version_dir.mkdir(parents=True, exist_ok=True)
+        lock = FileLock(version_dir / ".fetch.lock")
+        try:
+            lock.acquire(timeout=0)
+        except Timeout:
+            return build_response(status="skipped", step="fetch_package", system=request.system,
+                                  env=request.env, version_date=request.version_date,
+                                  message="相同系统、环境和版本正在取包，请稍后重试。")
         snapshot_time = _generate_snapshot_time(version_dir)
         snapshot_dir = version_dir / snapshot_time
         package_dir = snapshot_dir / "package"
@@ -53,6 +67,7 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
         latest_file = version_dir / "latest.txt"
         remote_archive = _build_remote_archive(
             package_config,
+            request.system,
             request.env,
             request.version_date,
         )
@@ -87,6 +102,7 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
                 latest_file,
                 response_context,
                 expected_remote_dir,
+                request,
             )
             if latest_response_data:
                 elapsed = time.time() - start_time
@@ -102,6 +118,7 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
                 return build_response(
                     status="success",
                     step="fetch_package",
+                    system=request.system,
                     env=request.env,
                     version_date=request.version_date,
                     message="已有可用 snapshot，本次未重新下载",
@@ -109,7 +126,6 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
                     warnings=warnings,
                 )
 
-        version_dir.mkdir(parents=True, exist_ok=True)
         snapshot_dir.mkdir(parents=True, exist_ok=False)
         package_dir.mkdir(parents=True, exist_ok=True)
 
@@ -126,6 +142,8 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
 
         try:
             previous_manifest = _load_json(previous_snapshot / "manifest.json") if previous_snapshot else None
+            if previous_manifest is not None:
+                _check_snapshot_owner(previous_manifest, request)
         except Exception as exc:
             logger.exception("load previous manifest failed")
             return _failed_response(request, "load_previous_manifest", "取包失败", exc, warnings, response_context)
@@ -156,8 +174,9 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
             logger.exception("remote_list failed")
             return _failed_response(request, "remote_list", "取包失败", exc, warnings, response_context)
 
-        response_context["candidates"] = candidates
-        actual_dir_name = _select_package_dir(candidates, request.version_date)
+        if request.debug:
+            response_context["candidates"] = candidates
+        actual_dir_name = _select_package_dir(candidates, expected_name, request.system)
         if parent_exists and actual_dir_name is not None:
             actual_remote_dir = f"{parent_dir.rstrip('/')}/{actual_dir_name}"
             response_context["actual_remote_dir"] = actual_remote_dir
@@ -171,12 +190,13 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
             parent_dir,
             expected_remote_dir,
             actual_remote_dir,
-            candidates,
+            response_context["candidates"],
         )
 
         if actual_remote_dir is None:
             return build_response(
                 status="not_found",
+                system=request.system,
                 step="fetch_package",
                 env=request.env,
                 version_date=request.version_date,
@@ -245,34 +265,37 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
                 env=request.env,
                 version_date=request.version_date,
                 snapshot_time=snapshot_time,
+                category_profile=package_config["category_profile"],
             )
-            _write_json(manifest_file, manifest)
             diff = generate_diff(manifest, previous_manifest)
+            diff["system"] = request.system
             _write_json(diff_file, diff)
-            upgrade_plan = generate_upgrade_plan(diff)
+            upgrade_plan = generate_upgrade_plan(diff, manifest)
             _write_json(upgrade_plan_file, upgrade_plan)
+            # 历史基线查找以 manifest 为准，最后才发布。
+            _write_json(manifest_file, manifest)
             _write_text(latest_file, str(snapshot_dir.resolve()))
         except Exception as exc:
             logger.exception("generate snapshot metadata failed")
             return _failed_response(request, "generate_snapshot_metadata", "取包失败", exc, warnings, response_context)
 
         file_count = manifest["file_count"]
-        warnings.extend(_check_required_dirs(package_dir))
+        if request.system == "legacy_account":
+            warnings.extend(_check_required_dirs(package_dir))
         summary = _build_response_summary(manifest, diff, upgrade_plan)
         elapsed = time.time() - start_time
         logger.info(
-            "fetch_package success encoding=%s parent_dir=%s expected_remote_dir=%s "
+            "fetch_package success system=%s env=%s encoding=%s parent_dir=%s expected_remote_dir=%s "
             "actual_remote_dir=%s candidates=%s version_dir=%s snapshot_dir=%s "
             "package_dir=%s manifest_file=%s diff_file=%s upgrade_plan_file=%s "
-            "mode=%s added_count=%s modified_count=%s deleted_count=%s "
-            "so_changed=%s sql_changed=%s ufx_changed=%s microservice_changed=%s "
-            "schedule_task_changed=%s workflow_changed=%s project_config_changed=%s "
-            "file_count=%s warnings=%s elapsed=%.2fs",
+            "mode=%s summary=%s warnings=%s elapsed=%.2fs",
+            request.system,
+            request.env,
             encoding,
             parent_dir,
             expected_remote_dir,
             actual_remote_dir,
-            candidates,
+            response_context["candidates"],
             version_dir,
             snapshot_dir,
             package_dir,
@@ -280,17 +303,7 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
             diff_file,
             upgrade_plan_file,
             diff["mode"],
-            summary["added_count"],
-            summary["modified_count"],
-            summary["deleted_count"],
-            summary["so_changed"],
-            summary["sql_changed"],
-            summary["ufx_changed"],
-            summary["microservice_changed"],
-            summary["schedule_task_changed"],
-            summary["workflow_changed"],
-            summary["project_config_changed"],
-            file_count,
+            summary,
             warnings,
             elapsed,
         )
@@ -298,6 +311,7 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
         return build_response(
             status="success",
             step="fetch_package",
+            system=request.system,
             env=request.env,
             version_date=request.version_date,
             message="取包完成",
@@ -313,6 +327,9 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
             warnings=warnings,
         )
 
+    except EnvironmentDisabled as exc:
+        return build_response(status="skipped", step="config", system=request.system, env=request.env,
+                              version_date=request.version_date, message=str(exc))
     except ConfigError as exc:
         logger.error("config error: %s", exc)
         return _failed_response(request, "config", "取包失败", exc, warnings)
@@ -320,29 +337,22 @@ def fetch_package(request: FetchPackageRequest) -> dict[str, Any]:
         logger.exception("fetch_package unexpected failed")
         return _failed_response(request, "fetch_package", "取包失败", exc, warnings, response_context)
     finally:
+        if lock is not None:
+            lock.release()
         if ssh_manager is not None:
             ssh_manager.close()
         elapsed = time.time() - start_time
         logger.info("fetch_package end elapsed=%.2fs", elapsed)
 
 
-def _build_remote_dir(package_config: dict[str, Any], year: str, version_date: str) -> str:
-    package_name = package_config["package_name_template"].format(version_date=version_date)
-    return f"{_build_parent_dir(package_config, year)}/{package_name}"
-
-
-def _build_parent_dir(package_config: dict[str, Any], year: str) -> str:
-    return f"{package_config['remote_root'].rstrip('/')}/{year}"
-
-
 def _build_version_dir(package_config: dict[str, Any], version_date: str) -> Path:
     return Path(package_config["local_root"]) / version_date
 
 
-def _build_remote_archive(package_config: dict[str, Any], env: str, version_date: str) -> str:
+def _build_remote_archive(package_config: dict[str, Any], system: str, env: str, version_date: str) -> str:
     return (
         f"{package_config['remote_temp_dir'].rstrip('/')}/"
-        f"account_upgrade_{env}_{version_date}.tar.gz"
+        f"account_upgrade_{system}_{env}_{version_date}_{uuid4().hex}.tar.gz"
     )
 
 
@@ -358,12 +368,15 @@ def _build_latest_snapshot_data(
     latest_file: Path,
     response_context: dict[str, Any],
     expected_remote_dir: str,
+    request: FetchPackageRequest,
 ) -> Optional[dict[str, Any]]:
     if not latest_file.is_file():
         return None
 
     try:
         snapshot_dir = Path(latest_file.read_text(encoding="utf-8").strip())
+        if snapshot_dir.resolve().parent != latest_file.parent.resolve():
+            raise ConfigError("latest.txt 指向当前版本目录之外。")
         manifest_file = snapshot_dir / "manifest.json"
         diff_file = snapshot_dir / "diff_from_previous.json"
         upgrade_plan_file = snapshot_dir / "upgrade_plan.json"
@@ -376,14 +389,17 @@ def _build_latest_snapshot_data(
             return None
 
         manifest = _load_json(manifest_file)
+        _check_snapshot_owner(manifest, request)
         diff = _load_json(diff_file)
         upgrade_plan = _load_json(upgrade_plan_file)
+    except ConfigError:
+        raise
     except Exception as exc:
         logger.warning("latest snapshot unavailable latest_file=%s error=%s", latest_file, exc)
         return None
 
     version_date = manifest.get("version_date", "")
-    package_dir = Path(manifest.get("package_dir", snapshot_dir / "package"))
+    package_dir = snapshot_dir / "package"
     archive_file = snapshot_dir / f"account_upgrade_{version_date}.tar.gz"
     summary = _build_response_summary(manifest, diff, upgrade_plan)
 
@@ -405,6 +421,14 @@ def _build_latest_snapshot_data(
     }
 
 
+def _check_snapshot_owner(manifest: dict[str, Any], request: FetchPackageRequest) -> None:
+    # 旧快照没有 system，只允许老账户读取，不修改原文件。
+    if (manifest.get("system", "legacy_account"), manifest.get("env"), manifest.get("version_date")) != (
+        request.system, request.env, request.version_date
+    ):
+        raise ConfigError("快照与本次 system/env/version_date 不符，请核对 local_root。")
+
+
 def _load_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as file:
         return json.load(file)
@@ -412,21 +436,25 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as file:
+    tmp = path.with_suffix(".tmp")
+    with tmp.open("w", encoding="utf-8") as file:
         json.dump(data, file, ensure_ascii=False, indent=2)
         file.write("\n")
+    tmp.replace(path)
 
 
 def _write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    tmp.replace(path)
 
 
 def _build_response_summary(
     manifest: dict[str, Any],
     diff: dict[str, Any],
     upgrade_plan: dict[str, Any],
-) -> dict[str, int]:
+) -> dict[str, Any]:
     diff_summary = diff.get("summary", {})
     plan_summary = upgrade_plan.get("summary", {})
     return {
@@ -443,6 +471,11 @@ def _build_response_summary(
         "workflow_changed": int(plan_summary.get("workflow_changed", 0)),
         "project_config_changed": int(plan_summary.get("project_config_changed", 0)),
         "other_changed": int(plan_summary.get("other_changed", 0)),
+        **{key: int(plan_summary.get(key, 0)) for key in
+           ("config_changed", "bus_component_changed", "plugin_changed", "route_config_changed")},
+        "upgrade_notes_present": plan_summary.get("upgrade_notes_present", False),
+        "upgrade_notes_count": plan_summary.get("upgrade_notes_count", 0),
+        "upgrade_notes_files": plan_summary.get("upgrade_notes_files", []),
     }
 
 
@@ -460,7 +493,7 @@ def _list_remote_package_candidates(
     if result.exit_status != 0:
         raise RuntimeError(result.stderr or result.stdout or "远程目录候选列表获取失败")
 
-    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    lines = [line for line in result.stdout.splitlines() if line]
     if PARENT_NOT_FOUND_MARKER in lines:
         return False, []
 
@@ -475,13 +508,14 @@ def _normalize_find_dir(path: str) -> str:
     return path.rstrip("/")
 
 
-def _select_package_dir(candidates: list[str], version_date: str) -> Optional[str]:
-    version_candidates = [name for name in candidates if version_date in name]
-    preferred_candidates = [name for name in version_candidates if "小远期" in name]
-    if preferred_candidates:
-        return preferred_candidates[0]
-    if version_candidates:
-        return version_candidates[0]
+def _select_package_dir(candidates: list[str], expected: str, system: str) -> Optional[str]:
+    if expected in candidates:
+        return expected
+    if system == "legacy_account":
+        # 老包名称的空格可能不同，但不能回退到同日其他渠道。
+        matches = [name for name in candidates if name.replace(" ", "") == expected.replace(" ", "")]
+        if len(matches) == 1:
+            return matches[0]
     return None
 
 
@@ -600,10 +634,11 @@ def _failed_response(
 ) -> dict[str, Any]:
     return build_response(
         status="failed",
+        system=request.system,
         step=step,
         env=request.env,
         version_date=request.version_date,
-        message=message,
+        message=f"{message}（{step}）：{exc}",
         data=data,
         warnings=warnings or [],
         error=str(exc),

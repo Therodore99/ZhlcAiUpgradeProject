@@ -36,7 +36,7 @@ manifest 记录每个文件的：
 
 relative_path 相对 package 目录，统一使用 / 分隔。
 
-category 根据路径和后缀判断：
+老账户 category 根据路径和后缀判断：
 
 1. appcom 下 .so 为 so。
 2. sql 下 .sql 为 sql。
@@ -48,6 +48,13 @@ category 根据路径和后缀判断：
 8. 其他文件为 other。
 
 ---
+
+### 其他系统的独立策略
+
+总线 ZIP 为 bus_component，added + modified 进入通知清单；其余为 other，不发布。
+信创按相对路径的一级目录分类：AcctDsrw → schedule_task、Config → config、Sql → sql、微服务 → microservice、特殊插件 → plugin、路由配置文件 → route_config、升级说明 → documentation，其余为 other。
+Config 和 Sql 变化生成 need_run 清单，SQL 保留人工确认；其余业务目录变化只生成通知。
+documentation.files 来自当前 manifest，而不是 diff；文件即使未变化也提醒。不解析、执行说明。各系统单独生成计划，不改变取包差异算法，也不计算部署差异。
 
 ## 3. diff 如何判断
 
@@ -94,7 +101,7 @@ upgrade_plan 根据 diff_from_previous.json 生成。
 added + modified
 ```
 
-按 category 分组：
+老账户按 category 分组：
 
 1. so -> tasks.so.files
 2. sql -> tasks.sql.files

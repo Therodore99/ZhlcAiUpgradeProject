@@ -32,6 +32,10 @@ POST /fetch-package
 
 ## 5. 输入参数
 
+### system
+
+legacy_account（默认）、bus、xinchuang_account。三个系统使用统一响应，顶层含 system，禁用环境返回 skipped。debug=false 不返回候选名称列表。
+
 ### env
 
 环境名称。
@@ -46,7 +50,7 @@ uat2
 
 ### year
 
-年份。
+兼容旧调用的可选字段，不参与取包路径计算。
 
 格式：
 
@@ -76,7 +80,7 @@ yyyymmdd
 
 是否强制重新下载。
 
-true：重新下载并覆盖已有压缩包和解压结果。
+true：重新下载到新快照，不覆盖历史。
 
 false：如果本地目录已存在，可返回已存在状态或跳过重复下载。
 
@@ -87,7 +91,7 @@ false：如果本地目录已存在，可返回已存在状态或跳过重复下
 ```json
 {
   "env": "uat1",
-  "year": "2026",
+  "system": "legacy_account",
   "version_date": "20260529",
   "force": true
 }
@@ -113,51 +117,11 @@ false：如果本地目录已存在，可返回已存在状态或跳过重复下
 
 ## 8. 远程目录拼接规则
 
-从环境配置读取：
+由 `systems.<system>.<env>.package` 提供完整 remote_root，在实际父目录枚举子目录，匹配 package_name_template 格式化后的名称。不计算年份。
 
-package.remote_root
-
-从接口参数读取：
-
-year
-
-version_date
-
-从环境配置读取：
-
-package.package_name_template
-
-最终远程目录规则：
-
-{package.remote_root}/{year}/{package.package_name_template}
-
-其中：
-
-package_name_template 中的 {version_date} 替换为接口参数 version_date。
-
-示例：
-
-remote_root：
-
-/home/hundsun/10-账户系统远期包
-
-year：
-
-2026
-
-package_name_template：
-
-账户升级包V{version_date}-小远期
-
-version_date：
-
-20260529
-
-最终远程目录：
-
-/home/hundsun/10-账户系统远期包/2026/账户升级包V20260529-小远期
-
----
+- 老账户 UAT1：`10-账户系统远期包/2026` 下的小远期；UAT2：`01-账户系统升级/2026升级包` 下的生产包。按 GBK 解码，优先精确；仅允许唯一的空格差异，不回退到其他包。
+- 总线：匹配 `总线升级包V{version_date}`，编码由各环境指定。
+- 信创：UTF-8，匹配 `V{version_date}`，禁止回退到 `_master`。
 
 ## 9. 本地目录拼接规则
 
@@ -240,7 +204,7 @@ V20260724
 
 校验 env 不为空。
 
-校验 year 为 4 位数字。
+旧请求传入非空 year 时，校验为 4 位数字。
 
 校验 version_date 为 8 位数字。
 
@@ -282,9 +246,9 @@ ssh_connect
 
 远程执行：
 
-test -d "{remote_dir}" && echo OK || echo NOT_FOUND
+在 remote_root 下执行 find . -maxdepth 1 -mindepth 1 -type d -print，再匹配真实目录。
 
-如果返回 NOT_FOUND，则返回：
+如果父目录或匹配的子目录不存在，则返回：
 
 status = not_found
 
@@ -298,7 +262,7 @@ cd "{remote_dir}" && tar -czf "{remote_archive}" .
 
 remote_archive 示例：
 
-/tmp/account_upgrade_{env}_{version_date}.tar.gz
+{remote_temp_dir}/account_upgrade_{system}_{env}_{version_date}_{uuid}.tar.gz
 
 失败 step：
 
@@ -348,7 +312,7 @@ extract_archive
 
 统计 package 目录下文件数量。
 
-检查关键目录是否存在：
+仅老账户检查关键目录是否存在：
 
 1. appcom
 2. sql
@@ -364,13 +328,14 @@ extract_archive
 {
   "status": "success",
   "step": "fetch_package",
+  "system": "legacy_account",
   "env": "uat1",
   "version_date": "20260529",
   "message": "取包完成",
   "data": {
     "remote_dir": "/home/hundsun/10-账户系统远期包/2026/账户升级包V20260529-小远期",
-    "local_dir": "D:/账户系统UAT1升级包/20260529",
-    "archive_file": "D:/账户系统UAT1升级包/20260529/account_upgrade_20260529.tar.gz",
+    "local_dir": "D:/账户系统UAT1升级包/20260529/20260629_190000/package",
+    "archive_file": "D:/账户系统UAT1升级包/20260529/20260629_190000/account_upgrade_20260529.tar.gz",
     "file_count": 100
   },
   "warnings": [],
@@ -386,6 +351,7 @@ extract_archive
 {
   "status": "not_found",
   "step": "fetch_package",
+  "system": "legacy_account",
   "env": "uat1",
   "version_date": "20260529",
   "message": "未发现当前版本升级包目录，等待下次触发",
@@ -405,6 +371,7 @@ extract_archive
 {
   "status": "failed",
   "step": "scp_download",
+  "system": "legacy_account",
   "env": "uat1",
   "version_date": "20260529",
   "message": "取包失败",
@@ -455,7 +422,7 @@ logs/fetch_package.log
 
 1. 重新下载压缩包。
 2. 重新解压。
-3. 覆盖已有同名文件。
+3. 将 latest.txt 指向新快照，保留旧快照。
 
 ---
 
@@ -524,7 +491,7 @@ latest.txt 写入 version_dir/latest.txt，内容为最新 snapshot_dir 的绝�
 
 relative_path 统一使用 / 分隔。
 
-分类规则：
+以下为老账户分类规则；总线和信创按各自策略生成，详见 [三系统规格](04_multi_system_fetch_spec.md)。
 
 1. 路径包含 appcom 且后缀为 .so，category=so。
 2. 路径包含 sql 且后缀为 .sql，category=sql。
@@ -577,7 +544,7 @@ diff 文件路径：
 {snapshot_dir}/upgrade_plan.json
 ```
 
-需要处理的文件为 added + modified。
+需要处理的文件为 added + modified；信创升级说明例外，按当前 manifest 中的存在性提醒。以下是老账户任务。
 
 按 category 分组生成 tasks：
 

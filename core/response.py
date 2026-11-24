@@ -5,6 +5,7 @@ def build_response(
     *,
     status: str,
     step: str,
+    system: Optional[str] = None,
     env: Optional[str] = None,
     version_date: Optional[str] = None,
     message: str,
@@ -15,6 +16,7 @@ def build_response(
     return {
         "status": status,
         "step": step,
+        **({"system": system} if system is not None else {}),
         "env": env,
         "version_date": version_date,
         "message": message,

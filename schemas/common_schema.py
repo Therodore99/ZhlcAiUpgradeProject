@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 class BaseResponseSchema(BaseModel):
     status: str
     step: str
+    system: Optional[str] = None
     env: Optional[str] = None
     version_date: Optional[str] = None
     message: str

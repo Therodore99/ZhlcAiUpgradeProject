@@ -9,6 +9,7 @@ def generate_manifest(
     env: str,
     version_date: str,
     snapshot_time: str,
+    category_profile: str = "legacy_account",
 ) -> dict[str, Any]:
     files = []
     for path in sorted(package_dir.rglob("*")):
@@ -20,7 +21,7 @@ def generate_manifest(
         files.append(
             {
                 "relative_path": relative_path,
-                "category": categorize_file(relative_path),
+                "category": categorize_file(relative_path, category_profile),
                 "file_name": path.name,
                 "size": stat_result.st_size,
                 "mtime": datetime.fromtimestamp(stat_result.st_mtime).strftime(
@@ -32,6 +33,7 @@ def generate_manifest(
         )
 
     return {
+        "system": category_profile,
         "env": env,
         "version_date": version_date,
         "snapshot_time": snapshot_time,
@@ -41,12 +43,25 @@ def generate_manifest(
     }
 
 
-def categorize_file(relative_path: str) -> str:
+XINCHUANG_DIRS = {
+    "AcctDsrw": "schedule_task", "Config": "config", "Sql": "sql",
+    "升级说明": "documentation", "微服务": "microservice",
+    "特殊插件": "plugin", "路由配置文件": "route_config",
+}
+
+
+def categorize_file(relative_path: str, category_profile: str = "legacy_account") -> str:
     normalized_path = relative_path.replace("\\", "/")
-    lower_path = normalized_path.lower()
     parts = normalized_path.split("/")
     lower_parts = [part.lower() for part in parts]
     suffix = Path(normalized_path).suffix.lower()
+
+    if category_profile == "bus":
+        return "bus_component" if suffix == ".zip" else "other"
+    if category_profile == "xinchuang_account":
+        return XINCHUANG_DIRS.get(parts[0], "other") if len(parts) > 1 else "other"
+    if category_profile != "legacy_account":
+        raise ValueError(f"未知分类策略: {category_profile}")
 
     if "appcom" in lower_parts and suffix == ".so":
         return "so"

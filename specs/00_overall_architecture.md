@@ -30,8 +30,8 @@
 
 当前阶段优先实现：
 
-1. 取包功能。
-2. 为后续 SO 升级预留架构。
+1. 老账户、总线、信创共用取包、快照、清单和差异服务；本阶段不执行升级。
+2. Dify 统一选择 system/env，调用同一个 POST /fetch-package。按 category_profile 独立分类和生成计划；后续各系统的执行模块分开开发。
 
 ### 3.2 后续阶段目标
 
@@ -554,7 +554,7 @@ GET /health
 负责：
 
 1. 读取 environments.yaml。
-2. 根据 env 获取对应环境配置。
+2. 根据 system + env 获取对应环境配置。
 3. 校验必要配置是否存在。
 
 ---
@@ -616,9 +616,9 @@ SSH/SCP 基础能力封装。
 负责定义：
 
 1. env。
-2. year。
+2. system（默认 legacy_account），旧 year 可选但忽略。
 3. version_date。
-4. force。
+4. force、debug。
 
 ---
 

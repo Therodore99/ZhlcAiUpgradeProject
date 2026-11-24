@@ -1,116 +1,189 @@
-environments:
-  uat1:
-    description: "账户系统 UAT1 环境"
+systems:
+  legacy_account:
+    uat1:
+      enabled: true
+      description: "账户系统 UAT1 环境"
 
-    package:
-      host: ""
-      port: 10022
-      protocol: "ssh"
-      encoding: "gbk"
-      username: ""
-      password: ""
-      remote_root: "/home/example/package-root"
-      package_name_template: "账户升级包V{version_date} - 小远期"
-      remote_temp_dir: "/tmp"
-      local_root: "./packages/uat1"
-      connect_timeout: 20
-      command_timeout: 300
+      package:
+        host: ""
+        port: 10022
+        protocol: "ssh"
+        category_profile: legacy_account
+        encoding: "gbk"
+        username: ""
+        password: ""
+        remote_root: "/home/hundsun/10-账户系统远期包/2026"
+        package_name_template: "账户升级包V{version_date} - 小远期"
+        remote_temp_dir: "/tmp"
+        local_root: "./packages/uat1"
+        connect_timeout: 20
+        command_timeout: 300
 
-    so:
-      host: ""
-      port: 10022
-      protocol: "ssh"
-      username: ""
-      password: ""
-      remote_appcom_dir: "/home/example/appcom"
-      remote_workspace_dir: "/home/example/workspace"
-      pre_command: "ks"
-      start_command: "./runall"
-      connect_timeout: 20
-      command_timeout: 300
+      so:
+        host: ""
+        port: 10022
+        protocol: "ssh"
+        username: ""
+        password: ""
+        remote_appcom_dir: "/home/example/appcom"
+        remote_workspace_dir: "/home/example/workspace"
+        pre_command: "ks"
+        start_command: "./runall"
+        connect_timeout: 20
+        command_timeout: 300
 
-    database:
-      host: ""
-      port: 1521
-      username: ""
-      password: ""
-      service_name: ""
+      database:
+        host: ""
+        port: 1521
+        username: ""
+        password: ""
+        service_name: ""
 
-    ufx:
-      host: ""
-      port: 445
-      protocol: "smb"
-      workspace_dir: "D:/fbase-ufx2/workspace"
+      ufx:
+        host: ""
+        port: 445
+        protocol: "smb"
+        workspace_dir: "D:/fbase-ufx2/workspace"
 
-    microservice:
-      host: ""
-      port: 8081
-      protocol: "http"
+      microservice:
+        host: ""
+        port: 8081
+        protocol: "http"
 
-    schedule_task:
-      host: ""
-      port: 8088
-      protocol: "http"
+      schedule_task:
+        host: ""
+        port: 8088
+        protocol: "http"
 
-    workflow:
-      host: ""
-      port: 8088
-      protocol: "http"
+      workflow:
+        host: ""
+        port: 8088
+        protocol: "http"
 
-  uat2:
-    description: "账户系统 UAT2 环境"
+    uat2:
+      enabled: true
+      description: "账户系统 UAT2 环境"
 
-    package:
-      host: ""
-      port: 10022
-      protocol: "ssh"
-      encoding: "gbk"
-      username: ""
-      password: ""
-      remote_root: "/home/example/package-root"
-      package_name_template: "账户升级包V{version_date}"
-      remote_temp_dir: "/tmp"
-      local_root: "./packages/uat2"
-      connect_timeout: 20
-      command_timeout: 300
+      package:
+        host: ""
+        port: 10022
+        protocol: "ssh"
+        category_profile: legacy_account
+        encoding: "gbk"
+        username: ""
+        password: ""
+        remote_root: "/home/hundsun/01-账户系统升级/2026升级包"
+        package_name_template: "账户升级包V{version_date}"
+        remote_temp_dir: "/tmp"
+        local_root: "./packages/uat2"
+        connect_timeout: 20
+        command_timeout: 300
 
-    so:
-      host: ""
-      port: 10022
-      protocol: "ssh"
-      username: ""
-      password: ""
-      remote_appcom_dir: "/home/example/appcom"
-      remote_workspace_dir: "/home/example/workspace"
-      pre_command: "ks"
-      start_command: "./runall"
-      connect_timeout: 20
-      command_timeout: 300
+      so:
+        host: ""
+        port: 10022
+        protocol: "ssh"
+        username: ""
+        password: ""
+        remote_appcom_dir: "/home/example/appcom"
+        remote_workspace_dir: "/home/example/workspace"
+        pre_command: "ks"
+        start_command: "./runall"
+        connect_timeout: 20
+        command_timeout: 300
 
-    database:
-      host: ""
-      port: 1521
-      username: ""
-      password: ""
-      service_name: ""
+      database:
+        host: ""
+        port: 1521
+        username: ""
+        password: ""
+        service_name: ""
 
-    ufx:
-      host: ""
-      port: 445
-      protocol: "smb"
-      workspace_dir: "D:/fbase-ufx2/workspace"
+      ufx:
+        host: ""
+        port: 445
+        protocol: "smb"
+        workspace_dir: "D:/fbase-ufx2/workspace"
 
-    microservice:
-      host: ""
-      port: 8081
-      protocol: "http"
+      microservice:
+        host: ""
+        port: 8081
+        protocol: "http"
 
-    schedule_task:
-      host: ""
-      port: 8088
-      protocol: "http"
+      schedule_task:
+        host: ""
+        port: 8088
+        protocol: "http"
 
-    workflow:
-      host: ""
-      port: 8088
-      protocol: "http"
+      workflow:
+        host: ""
+        port: 8088
+        protocol: "http"
+
+  bus:
+    uat1:
+      enabled: true
+      package:
+        host: ""
+        port: 10022
+        protocol: ssh
+        username: ""
+        password_env: "BUS_UAT1_PACKAGE_PASSWORD"
+        remote_root: "/home/hundsun/02-总线升级包/2026总线升级包"
+        package_name_template: "总线升级包V{version_date}"
+        encoding: "gbk"  # 待在总线包服务器验证
+        local_root: "./packages/bus/uat1"
+        category_profile: bus
+        remote_temp_dir: "/tmp"
+        connect_timeout: 20
+        command_timeout: 300
+    uat2:
+      enabled: true
+      package:
+        host: ""
+        port: 10022
+        protocol: ssh
+        username: ""
+        password_env: "BUS_UAT2_PACKAGE_PASSWORD"
+        remote_root: "/home/hundsun/02-总线升级包/2026总线升级包"
+        package_name_template: "总线升级包V{version_date}"
+        encoding: "gbk"  # 待在总线包服务器验证
+        local_root: "./packages/bus/uat2"
+        category_profile: bus
+        remote_temp_dir: "/tmp"
+        connect_timeout: 20
+        command_timeout: 300
+
+  xinchuang_account:
+    uat1:
+      enabled: true
+      package:
+        host: ""
+        port: 10022
+        protocol: ssh
+        username: ""
+        password_env: "XINCHUANG_ACCOUNT_UAT1_PACKAGE_PASSWORD"
+        remote_root: "/home/hundsun/21-2025账户信创升级"
+        package_name_template: "V{version_date}"
+        encoding: "utf-8"
+        local_root: "./packages/xinchuang_account/uat1"
+        category_profile: xinchuang_account
+        remote_temp_dir: "/tmp"
+        connect_timeout: 20
+        command_timeout: 300
+    uat2:
+      enabled: false
+      package:
+        host: ""
+        port: 10022
+        protocol: ssh
+        username: ""
+        password_env: "XINCHUANG_ACCOUNT_UAT2_PACKAGE_PASSWORD"
+        remote_root: "/home/hundsun/21-2025账户信创升级"
+        package_name_template: "V{version_date}"
+        encoding: "utf-8"
+        local_root: "./packages/xinchuang_account/uat2"
+        category_profile: xinchuang_account
+        remote_temp_dir: "/tmp"
+        connect_timeout: 20
+        command_timeout: 300
